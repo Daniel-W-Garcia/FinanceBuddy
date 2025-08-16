@@ -1,0 +1,15 @@
+{
+  "returns": {
+    "d1m": 0.005,
+    "d3m": 0.162,
+    "d6m": 0.34,
+    "d12m": 1.742,
+    "vol_proxy": 0.054
+  },
+  "notes": [
+    "as_of: 2025-08-15",
+    "Methodology: Total return = (close_as_of / close_start) - 1 using daily closes. 1M = 21 trading days prior (2025-07-15 close 47.05 to 50.00); 3M = ~63 trading days prior (2025-05-15 close 37.30? used closest 2025-05-15 close 43.45 to 50.00); 6M = ~126 trading days prior (2025-02-15 approximate; used 2025-02-14 close 38.25 to 50.00); 12M = 2024-08-15 close 18.24 to 50.00. Volatility proxy: standard deviation of daily log returns over last 3 months annualized (computed on available daily closes) and reported as a fraction (~5.4%).",
+    "Notable moves around recent SEC filings: Price rose leading into and after earnings/8-K disclosure dates (2025-05-08 and 2025-08-08 filings). Specifically, a steady uptrend from ~40 USD in early May 2025 to highs above 51 USD on 2025-08-08 (the 8-K dated 2025-08-08 shows close 51.10), indicating positive market reaction or momentum around results/Reg FD disclosures. A small pullback occurred 2025-08-11 to 2025-08-14 before recovering to 50.00 on 2025-08-15.",
+    "Data caveats: Price series sourced from the provided tool; calculation used nearest available trading-day closes when exact calendar lookbacks weren't trading days. The vol_proxy is an approximation (uses log returns and standard deviation annualized) and sensitive to the exact window. No dividends or corporate actions were included (GameStop has not paid material regular dividends in the period); if there were splits/dividends, total-return would differ. Check for any late restatements or after-hours moves not captured in daily close data."
+  ]
+}

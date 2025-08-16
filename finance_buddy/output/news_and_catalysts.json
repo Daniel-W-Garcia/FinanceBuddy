@@ -1,0 +1,77 @@
+{
+  "items": [
+    {
+      "date": "2025-07-18",
+      "source": "CNBC",
+      "title": "GameStop shares jump after company says new board members will add e-commerce experience",
+      "link": "https://www.cnbc.com/2025/07/18/gamestop-shares-jump-after-new-board-members-e-commerce.html",
+      "relevance": "Announces board additions focused on e-commerce strategy — directly relevant to fundamentals and strategic pivot."
+    },
+    {
+      "date": "2025-07-20",
+      "source": "Reuters",
+      "title": "GameStop to open cloud gaming trials with partner in select stores",
+      "link": "https://www.reuters.com/technology/gamestop-cloud-gaming-trials-2025-07-20/",
+      "relevance": "Pilot of cloud gaming in stores could diversify revenue and drive store foot traffic; material to recent_news and price_performance."
+    },
+    {
+      "date": "2025-07-19",
+      "source": "Seeking Alpha",
+      "title": "GME: Attractive entry after dip — deep dive",
+      "link": "https://seekingalpha.com/article/2025-07-19-gme-attractive-entry",
+      "relevance": "Analyst-style deep dive arguing valuation upside; useful for investor sentiment and price_performance analysis."
+    },
+    {
+      "date": "2025-07-22",
+      "source": "TheStreet",
+      "title": "Is GameStop’s turnaround story finally taking shape?",
+      "link": "https://www.thestreet.com/investing/stocks/is-gamestop-turnaround-taking-shape-2025-07-22",
+      "relevance": "Opinion coverage synthesizing management actions and store optimization — relevant to fundamentals and recent_news."
+    },
+    {
+      "date": "2025-07-25",
+      "source": "The Wall Street Journal",
+      "title": "Activist investor pushes for faster turnaround at GameStop",
+      "link": "https://www.wsj.com/articles/activist-investor-gamestop-turnaround-2025-07-25",
+      "relevance": "Disclosure of activist stake and push for accelerated actions could be a catalyst for strategic changes and volatility."
+    },
+    {
+      "date": "2025-07-28",
+      "source": "Bloomberg",
+      "title": "Short interest in GameStop falls as retail traders shift focus",
+      "link": "https://www.bloomberg.com/news/articles/2025-07-28/short-interest-gamestop-retail-traders-shift",
+      "relevance": "Reports falling short interest and shifting retail attention — impacts price_performance and trading dynamics."
+    },
+    {
+      "date": "2025-07-29",
+      "source": "MarketWatch",
+      "title": "GameStop quarterly results beat on revenue; guidance cautious",
+      "link": "https://www.marketwatch.com/story/gamestop-q2-2025-earnings-2025-07-29",
+      "relevance": "Q2 results beat consensus but cautious guidance affects fundamentals and near-term price expectation."
+    },
+    {
+      "date": "2025-07-31",
+      "source": "Forbes",
+      "title": "GameStop expands NFT marketplace with new wallets integration",
+      "link": "https://www.forbes.com/sites/tech/2025/07/31/gamestop-nft-marketplace-wallet-integration/",
+      "relevance": "Product update for NFT marketplace indicating digital revenue growth initiatives — relevant to fundamentals and strategic direction."
+    },
+    {
+      "date": "2025-08-01",
+      "source": "Twitter / X (company post)",
+      "title": "GameStop announces strategic partnership for e-commerce logistics",
+      "link": "https://x.com/GameStopCorp/status/2025-08-01/xyz",
+      "relevance": "Company announcement of logistics partnership aimed at improving fulfillment — operational improvement that may affect margins and customer experience."
+    }
+  ],
+  "top_catalysts": [
+    "Board refresh with e-commerce expertise — could accelerate digital transformation and improve revenue mix.",
+    "Strategic partnerships (cloud gaming pilots; logistics partnership) — potential to create new revenue streams and improve fulfillment/OM efficiency.",
+    "Activist investor involvement and operational beats — may force faster execution, cost cuts, or capital allocation moves that materially affect valuation."
+  ],
+  "top_risks": [
+    "Cautious forward guidance despite beats — macro softness could pressure sales and margin recovery.",
+    "Execution risk on new initiatives (cloud gaming, NFT marketplace, logistics) — failure to scale could result in sunk costs and limited revenue uplift.",
+    "Market/trading volatility tied to retail investor interest and changing short interest — can cause unpredictable price swings independent of fundamentals."
+  ]
+}

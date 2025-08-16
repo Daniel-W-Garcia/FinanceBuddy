@@ -1,0 +1,20 @@
+﻿[
+  {
+    "ticker": "AAPL",
+    "company": "Apple Inc",
+    "timeframe": "LTM",
+    "focus_areas": ["fundamentals", "recent_news", "product_launches"]
+  },
+  {
+    "ticker": "MSFT",
+    "company": "Microsoft Corporation",
+    "timeframe": "LTM",
+    "focus_areas": ["fundamentals", "AI_initiatives", "cloud_performance"]
+  },
+  {
+    "ticker": "GOOGL",
+    "company": "Alphabet Inc",
+    "timeframe": "YTD",
+    "focus_areas": ["fundamentals", "regulatory_risks", "AI_competition"]
+  }
+]
