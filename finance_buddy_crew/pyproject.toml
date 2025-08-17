@@ -1,0 +1,23 @@
+[project]
+name = "finance_buddy_crew"
+version = "0.1.0"
+description = "finance_buddy_crew using crewAI"
+authors = [{ name = "Daniel Garcia", email = "danielwgarcia@gmail.com" }]
+requires-python = ">=3.10,<3.13"
+dependencies = [
+    "crewai[tools]==0.157.0",
+]
+
+[project.scripts]
+finance_buddy_crew = "finance_buddy_crew.main:run"
+run_crew = "finance_buddy_crew.main:run"
+train = "finance_buddy_crew.main:train"
+replay = "finance_buddy_crew.main:replay"
+test = "finance_buddy_crew.main:test"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.crewai]
+type = "crew"
