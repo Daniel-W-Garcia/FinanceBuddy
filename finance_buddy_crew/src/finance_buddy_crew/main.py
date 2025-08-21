@@ -19,12 +19,21 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field, ConfigDict, ValidationError, model_validator
 
 from .crew import FinanceBuddy
+from .tools.extraction_tools import calculate_stock_returns
 
 warnings.filterwarnings("ignore", category=SyntaxWarning, module="pysbd")
 
 # configure simple CLI logging (libraries should not configure root logger)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
+
+def find_project_root(marker="pyproject.toml") -> Path:
+    """Finds the project root by searching upwards for a marker file."""
+    current_path = Path(__file__).resolve()
+    for parent in [current_path] + list(current_path.parents):
+        if (parent / marker).exists():
+            return parent
+    raise FileNotFoundError(f"Project root marker '{marker}' not found from {current_path}.")
 
 
 class InputModel(BaseModel):
@@ -71,23 +80,18 @@ def validate_inputs(inputs: Dict[str, Any]) -> InputModel:
 
 
 def run():
-    """
-    Legacy interactive run() entrypoint kept for backwards compatibility with earlier script.
-    Prompts for ticker if none provided on CLI, validates via InputModel, then kicks off the crew.
-    """
+
     inputs: Dict[str, Any] = {}
 
-    # If a CLI arg is provided (and it's not a command), use it to set ticker/company
     if len(sys.argv) > 1:
         first = sys.argv[1]
         if first not in ("batch", "train", "replay", "test"):
-            # treat it as ticker or company (simple heuristic)
             if "." in first or len(first) <= 5:
                 inputs["ticker"] = first
             else:
                 inputs["company"] = first
 
-    # Interactive prompt if still missing
+    # Interactive prompt
     if not (inputs.get("ticker") or inputs.get("company")):
         try:
             ticker = input("Enter the stock ticker (e.g., AAPL): ").strip()
@@ -98,7 +102,7 @@ def run():
             logger.error("No input provided; exiting.")
             return
 
-    # Default research params (if not supplied elsewhere)
+    # Default research params
     inputs.setdefault("timeframe", "LTM")
     inputs.setdefault("focus_areas", ["fundamentals", "recent_news", "price_performance", "key_risks"])
     inputs.setdefault("output_format", "executive_summary")
@@ -106,6 +110,22 @@ def run():
     try:
         validated = validate_inputs(inputs)
         print(f"\n🔍 Starting research for: {validated.company} ({validated.ticker})")
+
+        print("📊 Calculating price context...")
+        price_data = calculate_stock_returns(
+            ticker=validated.ticker,
+            as_of_date=validated.current_date
+        )
+
+        crew_inputs = validated.model_dump()
+
+        returns = price_data.get("returns", {})
+        crew_inputs['d1m_return'] = returns.get('d1m', 'N/A')
+        crew_inputs['d3m_return'] = returns.get('d3m', 'N/A')
+        crew_inputs['d6m_return'] = returns.get('d6m', 'N/A')
+        crew_inputs['d12m_return'] = returns.get('d12m', 'N/A')
+
+        print("✅ Price context values extracted.")
 
         # DEBUG: inspect CrewAI's registered output-pydantic mapping keys so we can align tasks.yaml
         try:
@@ -124,38 +144,93 @@ def run():
 
         fb = FinanceBuddy()
         crew = fb.crew()
-        # Use kickoff (preserves your original behavior). If your crewai version uses run() change accordingly.
-        result = crew.kickoff(inputs=validated.model_dump())
+        result = crew.kickoff(inputs=crew_inputs)
 
         # After crew run, validate task outputs (post-run)
         try:
-            # Resolve package-root relative paths to avoid CWD surprises
-            from pathlib import Path
-            pkg_root = Path(__file__).resolve().parent
-            tasks_yaml_path = str(pkg_root / "tasks.yaml")
-            diagnostics_dir = str(pkg_root / "output" / "diagnostics")
+            project_root = find_project_root()
+            tasks_yaml_path = str(project_root / "tasks.yaml")
+            diagnostics_dir = str(project_root / "output" / "diagnostics")
 
             # Import and run validator (import inside to avoid import-time cost and circular issues)
             from .tools.validate_task_outputs import validate_all_task_outputs
             validate_all_task_outputs(
                 tasks_yaml_path=tasks_yaml_path,
-                base_dir=str(pkg_root),
+                base_dir=str(project_root),
                 diagnostics_dir=diagnostics_dir,
             )
         except Exception as e:
             logger.exception("Post-run validation failed: %s", e)
 
+        # Simple markdown generation (ADD THIS)
+        try:
+            _create_markdown_report()
+            print("📖 Human-readable report: output/synthesis_brief.md")
+        except Exception as e:
+            logger.warning("Markdown generation failed: %s", e)
+
         print("\n✅ Research completed successfully!")
-        print("📁 Reports saved in 'output' directory")
+        print("📁 JSON reports saved in 'output' directory")
         return result
+
     except Exception as e:
         logger.exception("Error during run(): %s", e)
         raise
 
 
-# Keep the other infrastructure functions (batch_run, train, replay, test) similar to your original
+def _create_markdown_report():
+    import json
+    from pathlib import Path
+
+    project_root = find_project_root()
+    output_dir = project_root / "output"
+    json_file = output_dir / "synthesis_brief.json"
+    md_file = output_dir / "synthesis_brief.md"
+    if not json_file.exists():
+        return
+
+    with open(json_file) as f:
+        data = json.load(f)
+
+    ticker = data.get('raw_input', {}).get('ticker', 'UNKNOWN')
+
+    md_lines = [
+        f"# 📊 {ticker} Research Brief",
+        "",
+        "## Summary",
+    ]
+
+    for item in data.get('tldr', []):
+        md_lines.append(f"• {item}")
+
+    md_lines.extend(["", "## Key Positives"])
+    for item in data.get('positives', []):
+        md_lines.append(f"• {item}")
+
+    md_lines.extend(["", "## Key Risks"])
+    for item in data.get('risks', []):
+        md_lines.append(f"• {item}")
+
+    md_lines.extend(["", "## Next Steps"])
+    for item in data.get('next_steps', []):
+        md_lines.append(f"• {item}")
+
+    md_lines.extend([
+        "",
+        "---",
+        "",
+        data.get('disclaimer', 'This is not investment advice.')
+    ])
+
+    with open(md_file, 'w') as f:
+        f.write('\n'.join(md_lines))
+
+
 def batch_run(batch_file: str):
+    project_root = find_project_root()
     path = Path(batch_file)
+    if not path.is_absolute():
+        path = project_root / path
     if not path.exists():
         logger.error("Batch file not found: %s", batch_file)
         return
@@ -172,7 +247,7 @@ def batch_run(batch_file: str):
         except Exception as e:
             logger.exception("Batch job failed for %s: %s", job, e)
             results.append({"input": job, "status": "error", "error": str(e)})
-    out = Path("output")
+    out = project_root / "output"
     out.mkdir(parents=True, exist_ok=True)
     with (out / "batch_results.json").open("w", encoding="utf-8") as fh:
         json.dump(results, fh, indent=2)
@@ -200,7 +275,6 @@ def test(n_iterations: int, eval_llm: str, inputs: Dict[str, Any]):
 
 
 if __name__ == "__main__":
-    # Keep the simple command dispatch you had previously so the script remains familiar
     if len(sys.argv) > 1:
         cmd = sys.argv[1]
         if cmd == "batch":

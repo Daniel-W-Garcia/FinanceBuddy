@@ -10,6 +10,8 @@ from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime, timezone, date
 from functools import lru_cache
 
+import pandas as pd
+
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util import Retry
@@ -236,7 +238,7 @@ def gdelt_news(
     if not query or not query.strip():
         raise ValueError("query must be a non-empty string")
     params: Dict[str, Any] = {
-        "query": query,            # DO NOT pre-quote; requests will encode
+        "query": query,
         "mode": "ArtList",
         "format": "JSON",
         "maxrecords": int(limit),
@@ -284,109 +286,65 @@ def gdelt_news(
 
 
 # -----------------------
-# Stooq: Daily OHLC CSV
+# YFinance: Daily OHLC using yfinance library
 # -----------------------
-def stooq_prices(
-    symbol: str,
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
-    client: RequestsClient = _default_client
+def yahoo_prices(
+        symbol: str,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        client: RequestsClient = _default_client  # Keep for compatibility but won't use
 ) -> List[Dict[str, Any]]:
+    """
+    Fetch daily OHLC price history using yfinance library.
+    Returns data in the same format as stooq_prices for compatibility.
+    """
+    try:
+        import yfinance as yf
+        import pandas as pd
+    except ImportError as exc:
+        raise FeedError(f"Required library not installed: {exc}. Run: pip install yfinance pandas")
+
     if not symbol or not symbol.strip():
         raise ValueError("symbol must be non-empty")
-    sym = symbol.strip().lower()
-    urls = [f"https://stooq.com/q/d/l/?s={sym}&i=d"]
-    if not sym.endswith(".us"):
-        urls.append(f"https://stooq.com/q/d/l/?s={sym}.us&i=d")
 
-    # Determine filter window
-    start_dt: Optional[date] = None
-    if start_date:
-        try:
-            start_dt = datetime.strptime(start_date, "%Y-%m-%d").date()
-        except ValueError as exc:
-            raise ValueError("start_date must be YYYY-MM-DD") from exc
+    sym = symbol.strip().upper()
 
-    end_dt: date
-    if end_date:
-        try:
-            end_dt = datetime.strptime(end_date, "%Y-%m-%d").date()
-        except ValueError as exc:
-            raise ValueError("end_date must be YYYY-MM-DD") from exc
-    else:
-        end_dt = _today_utc_date()
+    try:
+        ticker = yf.Ticker(sym)
 
-    last_err: Optional[str] = None
-    for url in urls:
-        try:
-            r = client.get(url)
-        except HTTPFeedError as exc:
-            last_err = f"HTTP error when fetching {url}: {exc}"
-            logger.debug(last_err)
-            continue
-        except requests.RequestException as exc:
-            last_err = f"Network error when fetching {url}: {exc}"
-            logger.debug(last_err)
-            continue
+        if start_date and end_date:
+            hist = ticker.history(start=start_date, end=end_date)
+        elif start_date:
+            hist = ticker.history(start=start_date)
+        else:
+            # Default to 1 year of data
+            hist = ticker.history(period="1y")
 
-        txt = r.text or ""
-        # Stooq returns plain "No data" or an error body for unknown symbols
-        if r.status_code != 200 or txt.strip().lower().startswith("error") or not txt.strip():
-            last_err = f"No data at {url}"
-            logger.debug("Stooq returned no data for %s: status=%s, body=%r", url, r.status_code, txt[:200])
-            continue
+        if hist.empty:
+            raise NotFoundError(f"No price data found for symbol {symbol}")
 
-        f = io.StringIO(txt)
         rows: List[Dict[str, Any]] = []
-        reader = csv.DictReader(f)
-        for row in reader:
-            # Skip rows missing mandatory fields
-            if not row.get("Date") or not row.get("Close"):
-                continue
-            try:
-                d = datetime.strptime(row["Date"].strip(), "%Y-%m-%d").date()
-            except Exception:
-                # Malformed date; skip
-                logger.debug("Skipping malformed date row: %r", row)
-                continue
-            if start_dt and d < start_dt:
-                continue
-            if d > end_dt:
-                continue
 
-            def _to_float(v: Optional[str]) -> Optional[float]:
-                if v is None:
-                    return None
-                v = v.strip()
-                if v == "" or v.lower() == "nan":
-                    return None
-                try:
-                    return float(v.replace(",", ""))
-                except Exception:
-                    return None
-
-            def _to_int(v: Optional[str]) -> Optional[int]:
-                if v is None:
-                    return None
-                v = v.strip()
-                if v == "" or v.lower() == "nan":
-                    return None
-                try:
-                    return int(float(v.replace(",", "")))
-                except Exception:
-                    return None
+        for date_idx, row in hist.iterrows():
+            date_str = date_idx.strftime("%Y-%m-%d")
 
             rows.append({
-                "date": row["Date"].strip(),
-                "open": _to_float(row.get("Open")),
-                "high": _to_float(row.get("High")),
-                "low": _to_float(row.get("Low")),
-                "close": _to_float(row.get("Close")),
-                "volume": _to_int(row.get("Volume")),
+                "date": date_str,
+                "open": None if pd.isna(row['Open']) else float(row['Open']),
+                "high": None if pd.isna(row['High']) else float(row['High']),
+                "low": None if pd.isna(row['Low']) else float(row['Low']),
+                "close": None if pd.isna(row['Close']) else float(row['Close']),
+                "volume": None if pd.isna(row['Volume']) else int(row['Volume']),
             })
 
-        if rows:
-            return rows
+        if not rows:
+            raise NotFoundError(f"No valid price data found for symbol {symbol}")
 
-    # Nothing found on any candidate URL
-    raise NotFoundError(last_err or f"Price data not found for symbol {symbol}")
+        rows.sort(key=lambda x: x["date"], reverse=True)
+        return rows
+
+    except Exception as exc:
+        if isinstance(exc, (NotFoundError, ValueError)):
+            raise
+        logger.exception("YFinance error for symbol %s", sym)
+        raise FeedError(f"Failed to fetch price data for {symbol}: {exc}") from exc

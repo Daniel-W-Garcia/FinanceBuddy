@@ -1,103 +1,107 @@
-# tasks.yaml
 meta:
   version: 1
   schema_version: 1.0
   project: FinanceBuddy
-  last_updated: 2025-08-17
+  last_updated: 2025-08-20
 
 scope_request_task:
   agent: intake_coordinator
   description: >
-    Analyze the research request for ticker '{ticker}' with timeframe '{timeframe}' and focus areas {focus_areas}.
-    Clarify the company name, exchange, and create a structured research brief with clear parameters and success criteria.
-    Use 'as_of {current_date}' for all time-sensitive statements.
+    Analyze the research request for ticker '{ticker}', timeframe '{timeframe}', and focus areas {focus_areas}.
+    Create a structured research brief that will serve as the master instructions for all other analysts.
   output_file: "output/research_scope.json"
   expected_output: >
-    Structured brief including: company name, ticker, exchange (if known), timeframe, focus areas, output_format, constraints;
-    include 3–5 peer candidates by SIC if available. Include 'as_of' field set to '{current_date}'.
+    Structured brief including: company name, ticker, timeframe, and focus_areas.
   context: []
 
 edgar_basics_task:
-  agent: research_analyst
+  agent: edgar_research_analyst
   description: >
-    Research company with ticker '{ticker}'. First call get_sec_info to resolve ticker → CIK, then call get_recent_filings
-    to pull the 5–10 most relevant filings (10-K/10-Q/8-K). Capture direct document links and notable Items (e.g., 8‑K items).
-    Where possible, identify the current CEO from authoritative sources (DEF 14A, 10‑K, 8‑K) as of '{current_date}'.
+    Following the master instructions, conduct research on the company with ticker '{ticker}'.
+    First, use get_sec_info to resolve the ticker to its CIK. Then, use get_recent_filings
+    to get a list of all filings in the last 12 months (10-K, 10-Q, 8-K).
   output_file: "output/edgar_basics.json"
   expected_output: >
-    CIK, company name, SIC, CEO (as of {current_date}) and ceo_source_url; a list of recent filings with form type, filing date,
-    accession, Items summary (if 8‑K), and direct document links. If uncertain on CEO, set 'ceo' to 'Unknown' and note why.
-    Include 'as_of: {current_date}'.
-  tool_calls:
-    - tool: "get_sec_info"
-      input: { ticker: "{ticker}" }
-      input_contract: { ticker: {type: "string", pattern: "^[A-Za-z0-9\\.\\-]{1,6}$"} }
-    - tool: "get_recent_filings"
-      input: { cik10: "{cik10}" }
-      input_contract: { cik10: {type: "string", pattern: "^\\d{10}$"} }
+    A JSON object containing the CIK, company name, and a list of recent filings.
   context:
     - scope_request_task
 
 company_facts_snapshot_task:
-  agent: financial_analyst
+  agent: facts_reporter
   description: >
-    Using the CIK from edgar_basics_task for ticker '{ticker}', call get_company_facts with only {"cik10":"<CIK10>"}.
-    Fetch core XBRL facts (revenue, operating income, net income, diluted EPS, shares, cash/FCF proxy, debt)
-    and summarize {timeframe} with trends versus prior periods. Include raw_facts in the output.
+    Following the master instructions, your job is to get a summary of the company's financial facts.
+    Use the 'get_company_facts' tool, passing the CIK provided by the edgar_basics_task.
+    Your only task is to execute the tool and present the summarized data it returns. Do not add any analysis.
   output_file: "output/company_facts_snapshot.json"
   expected_output: >
-    Compact table of key metrics (LTM and last 2–3 periods), units/currency, and 3–5 trend bullet notes with caveats.
-    Include 'as_of: {current_date}' and include the full SEC JSON under 'raw_facts'.
-  tool_calls:
-    - tool: "get_company_facts"
-      input: { cik10: "{cik10}" }
-      input_contract: { cik10: {type: "string", pattern: "^\\d{10}$", required: true} }
+    A JSON object containing a clean, structured table of the key financial metrics provided by the tool.
   context:
+    - scope_request_task
+    - edgar_basics_task
+
+price_context_task:
+  agent: price_reporter
+  description: >
+    Report the exact, pre-calculated return percentages provided to you. Do not perform calculations.
+    - 1-Month Return: {d1m_return}%
+    - 3-Month Return: {d3m_return}%
+    - 6-Month Return: {d6m_return}%
+    - 12-Month Return: {d12m_return}%
+  output_file: "output/price_context.json"
+  expected_output: >
+    A structured JSON with the key-value pairs for the return percentages provided.
+  context:
+    - scope_request_task
     - edgar_basics_task
 
 news_and_catalysts_task:
-  agent: research_analyst
+  agent: news_research_analyst
   description: >
-    Use get_news to search for recent news about ticker '{ticker}' for the past 14–30 days up to '{current_date}'.
-    Deduplicate headlines and flag potential catalysts/risks aligned to the focus_areas.
+    Following the master instructions, use the get_news tool to find recent news about '{ticker}' for the past 30 days.
+    Your output should be a clean, summarized list of the top 5-10 most relevant articles.
   output_file: "output/news_and_catalysts.json"
   expected_output: >
-    A list of 5–10 recent items: date, source, title, link, and 1‑sentence relevance; top 3 catalysts/risks bullets.
-    Ensure item dates do not exceed {current_date}; include 'as_of: {current_date}'.
-  tool_calls:
-    - tool: "get_news"
-      input: { query: "{ticker} OR {ticker}" }
-      input_contract: { query: {type: "string"} }
+    A clean list of 5–10 recent news items with date, source, title, and link.
   context:
     - scope_request_task
 
-price_context_task:
-  agent: financial_analyst
+fundamental_analysis_task:
+  agent: fundamental_analyst
   description: >
-    Use get_prices to pull the last 6–12 months of daily closes for ticker '{ticker}'; compute simple stats
-    (1M/3M/6M/12M total return, volatility proxy) and note any moves around filing dates from edgar_basics_task.
-  output_file: "output/price_context.json"
+    Analyze the company's financial health based on the data reports.
+    Review the financial facts and price context reports to provide 3-5 bullet points on fundamental strengths and weaknesses, 
+    aligning with the original {focus_areas}.
+  output_file: "output/fundamental_analysis.json"
   expected_output: >
-    A small table of returns over common windows, a brief note on notable swings around filing dates, and any data caveats.
-    Include 'as_of: {current_date}'.
-  tool_calls:
-    - tool: "get_prices"
-      input: { symbol: "{ticker}" }
-      input_contract: { symbol: {type: "string"} }
+    A JSON object with a 'fundamental_takeaways' key containing your analysis.
+  context:
+    - scope_request_task
+    - company_facts_snapshot_task
+    - price_context_task
+
+qualitative_analysis_task:
+  agent: qualitative_analyst
+  description: >
+    Analyze the company's strategic position based on the provided documents.
+    Review the recent filings and news reports to provide 3-5 bullet points on qualitative strengths 
+    and risks (brand, competition, management), aligning with the original {focus_areas}.
+  output_file: "output/qualitative_analysis.json"
+  expected_output: >
+    A JSON object with a 'qualitative_takeaways' key containing your analysis.
   context:
     - scope_request_task
     - edgar_basics_task
+    - news_and_catalysts_task
 
 synthesis_brief_task:
   agent: lead_synthesizer
   description: >
-    Synthesize the prior task outputs into a client-ready executive brief for ticker '{ticker}' (timeframe: '{timeframe}').
-    Focus on {focus_areas} and state all facts 'as of {current_date}'.
+    Synthesize all prior data and analysis reports into a single, client-ready executive brief for ticker '{ticker}'.
+    Ensure the final report addresses the original {focus_areas} from the master instructions.
   output_file: "output/synthesis_brief.json"
   expected_output: >
-    One-page summary: TL;DR (3 bullets), positives (3–5), risks (3–5), notable filings and dates, fundamentals takeaways (2–3),
-    recent catalysts (2–3), suggested next steps; include 'Not investment advice' disclaimer and an 'as_of' line with {current_date}.
+    A comprehensive, one-page summary combining all data and analysis into a coherent brief.
   context:
-    - company_facts_snapshot_task
-    - news_and_catalysts_task
-    - price_context_task
+    - scope_request_task
+    - fundamental_analysis_task
+    - qualitative_analysis_task

@@ -219,3 +219,9 @@ cython_debug/
 # PyCharm
 .idea/
 
+# google
+google-cloud-sdk/
+google-cloud-cli-linux-x86_64.tar.gz
+.gz
+.tar
+

@@ -5,7 +5,10 @@ description = "finance_buddy_crew using crewAI"
 authors = [{ name = "Daniel Garcia", email = "danielwgarcia@gmail.com" }]
 requires-python = ">=3.10,<3.13"
 dependencies = [
-    "crewai[tools]==0.157.0",
+    "crewai[tools]==0.165.1",
+    "yfinance",
+    "pandas",
+    "numpy"
 ]
 
 [project.scripts]
