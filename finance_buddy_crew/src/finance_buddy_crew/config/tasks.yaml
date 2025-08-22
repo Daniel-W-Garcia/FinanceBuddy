@@ -29,15 +29,16 @@ edgar_basics_task:
 company_facts_snapshot_task:
   agent: facts_reporter
   description: >
-    Following the master instructions, your job is to get a summary of the company's financial facts.
-    Use the 'get_company_facts' tool, passing the CIK provided by the edgar_basics_task.
-    Your only task is to execute the tool and present the summarized data it returns. Do not add any analysis.
+    You have been provided with a clean, pre-processed JSON summary of the company's core financial facts in the '{company_facts_data}' variable.
+    Your only task is to present this data clearly in a structured format for other analysts to use. 
+    Do not add any analysis or change any of the numbers.
   output_file: "output/company_facts_snapshot.json"
   expected_output: >
-    A JSON object containing a clean, structured table of the key financial metrics provided by the tool.
+    A JSON object containing a clean, structured table of the key financial metrics, exactly as provided to you in the input data.
   context:
     - scope_request_task
     - edgar_basics_task
+
 
 price_context_task:
   agent: price_reporter

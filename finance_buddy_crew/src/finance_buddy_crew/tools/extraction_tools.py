@@ -3,10 +3,10 @@ from typing import Any, Callable, Dict, List, Optional, Type
 import functools
 import logging
 import importlib
-from datetime import datetime
 import pandas as pd
+from pandas.tseries.offsets import DateOffset
 import numpy as np
-from datetime import datetime, timedelta
+from datetime import datetime
 import math
 
 
@@ -24,33 +24,20 @@ from .feeds import (
 logger = logging.getLogger(__name__)
 
 
+# extraction_tools.py (Replace the whole function with this)
+
 def _process_sec_facts(raw_facts: dict, timeframe: str = "LTM") -> dict:
     """
     Parses the raw, complex JSON from the SEC companyfacts API into a clean,
-    structured dictionary that matches our Pydantic schema.
+    structured dictionary that matches our Pydantic schema, and derives key metrics.
     """
     processed_data = {
-        "currency": "USD",  # Default, can be improved
+        "currency": "USD",
         "notes": [],
         "revenue": [],
         "operating_income": [],
         "net_income": [],
         "diluted_eps": [],
-        "shares_diluted": [],
-        "cash_or_fcf_proxy": [],
-        "debt": []
-    }
-
-    # Mapping from our simple field names to the complex SEC XBRL tags
-    metric_map = {
-        "revenue": "Revenues",
-        "net_income": "NetIncomeLoss",
-        "operating_income": "OperatingIncomeLoss",
-        "diluted_eps": "EarningsPerShareDiluted",
-        "shares_diluted": "WeightedAverageNumberOfDilutedSharesOutstanding",
-        "debt": "LongTermDebt"  # Example, might need adjustment
-        # 'cash_or_fcf_proxy' is complex and often needs to be derived.
-        # For now, we can look for 'NetCashProvidedByUsedInOperatingActivities'.
     }
 
     if not raw_facts.get("facts"):
@@ -59,36 +46,104 @@ def _process_sec_facts(raw_facts: dict, timeframe: str = "LTM") -> dict:
 
     facts = raw_facts["facts"].get("us-gaap", {})
 
-    for field, sec_tag in metric_map.items():
-        if sec_tag in facts:
-            try:
-                # Find the 'USD' units, which is a list of all data points
-                points = facts[sec_tag]["units"]["USD"]
+    # Helper to pull the raw data points for a given SEC tag
+    def _get_fact_values(tag: str) -> dict:
+        try:
+            points = facts[tag]["units"]["USD"]
+            # We only care about quarterly (10-Q) and annual (10-K) filings
+            relevant_points = [p for p in points if p.get("form") in ["10-Q", "10-K"]]
+            # Return a dictionary mapping the period end-date to the value
+            return {p['end']: p['val'] for p in relevant_points}
+        except KeyError:
+            processed_data["notes"].append(f"Metric tag not found or has no USD data: {tag}")
+            return {}
 
-                # Filter for the most recent annual (10-K) and quarterly (10-Q) filings
-                # This is a simplification; a real LTM would sum the last 4 quarters.
-                recent_points = [p for p in points if p['form'] in ['10-K', '10-Q']]
+    # --- 1. Fetch the fundamental building blocks ---
+    revenues = _get_fact_values("Revenues")
+    costs_of_revenue = _get_fact_values("CostOfGoodsAndServicesSold")  # GME is a retailer, so this tag is key
+    net_income = _get_fact_values("NetIncomeLoss")
+    eps_diluted = _get_fact_values("EarningsPerShareDiluted")
 
-                # Sort by date and take the last few
-                recent_points.sort(key=lambda x: x['end'], reverse=True)
+    if not revenues:
+        processed_data["notes"].append("Could not process facts without Revenue data.")
+        return processed_data
 
-                for p in recent_points[:4]:  # Get the last 4 periods
-                    processed_data[field].append({
-                        "period": p.get("end"),
-                        "value": p.get("val"),
-                        "unit": "USD"  # Assuming USD
-                    })
+    # --- 2. Iterate through periods and build the snapshot ---
+    # Get all unique reporting dates from the revenue data, and sort them
+    all_periods = sorted(revenues.keys(), reverse=True)
 
-            except KeyError:
-                processed_data["notes"].append(f"Could not find USD data for metric: {sec_tag}")
-            except Exception as e:
-                processed_data["notes"].append(f"Error processing {sec_tag}: {str(e)}")
+    for period in all_periods[:8]:  # Look at the last 8 periods (2 years)
+        rev = revenues.get(period)
+        cost = costs_of_revenue.get(period)
 
-    # Include the original raw data if needed downstream, as per your schema
+        # We can only calculate profit if both revenue and cost are present for a period
+        op_income = None
+        if rev is not None and cost is not None:
+            # This is a simplification. Real operating income also subtracts SG&A.
+            # But for this purpose, Gross Profit is a much better proxy than what we had.
+            op_income = rev - cost
+
+        processed_data["revenue"].append({"period": period, "value": rev, "unit": "USD"})
+        processed_data["operating_income"].append({"period": period, "value": op_income, "unit": "USD"})
+        processed_data["net_income"].append({"period": period, "value": net_income.get(period), "unit": "USD"})
+        processed_data["diluted_eps"].append({"period": period, "value": eps_diluted.get(period), "unit": "USD/Share"})
+
     processed_data['raw_facts'] = raw_facts
-
     return processed_data
 
+
+# extraction_tools.py (ADD THIS NEW FUNCTION)
+
+def get_financial_statements(ticker: str) -> dict:
+    """
+    Gets key financial statement data from yfinance for the last 4 years
+    and returns it in a clean, structured format for reporting.
+    """
+    try:
+        import yfinance as yf
+    except ImportError:
+        raise ImportError("yfinance is not installed. Please install it with 'pip install yfinance'")
+
+    print(f"Fetching financial statements for {ticker} from yfinance...")
+    stock = yf.Ticker(ticker)
+
+    # Fetch the income statement, balance sheet, and stock info
+    income_stmt = stock.income_stmt
+    balance_sheet = stock.balance_sheet
+    stock_info = stock.info
+
+    # Prepare our clean output dictionary
+    processed_data = {
+        "notes": ["Data sourced from yfinance."],
+        "revenue": [], "operating_income": [], "net_income": [],
+        "debt": [], "cash": [], "shares_diluted": []
+    }
+
+    # Process Income Statement (last 4 periods)
+    income_stmt_t = income_stmt.transpose().head(4)
+    for period, data in income_stmt_t.iterrows():
+        period_str = period.strftime('%Y-%m-%d')
+        processed_data["revenue"].append({"period": period_str, "value": data.get("Total Revenue")})
+        processed_data["operating_income"].append({"period": period_str, "value": data.get("Operating Income")})
+        processed_data["net_income"].append({"period": period_str, "value": data.get("Net Income")})
+
+    # Process Balance Sheet (last 4 periods)
+    balance_sheet_t = balance_sheet.transpose().head(4)
+    for period, data in balance_sheet_t.iterrows():
+        period_str = period.strftime('%Y-%m-%d')
+        processed_data["debt"].append({"period": period_str, "value": data.get("Total Debt")})
+        processed_data["cash"].append({"period": period_str, "value": data.get("Cash And Cash Equivalents")})
+
+    # Add shares outstanding as a single, current value
+    if stock_info.get("sharesOutstanding"):
+        latest_period = income_stmt_t.index[0].strftime('%Y-%m-%d')
+        processed_data["shares_diluted"].append({
+            "period": latest_period,
+            "value": stock_info.get("sharesOutstanding")
+        })
+
+    print("✅ Financial statements fetched and processed successfully.")
+    return processed_data
 
 def calculate_stock_returns(ticker: str, as_of_date: str) -> dict:
     """
@@ -125,17 +180,16 @@ def calculate_stock_returns(ticker: str, as_of_date: str) -> dict:
         calculation_details = {}
         warnings = []
 
-        # Define periods in days
         periods = {
-            "d1m": 30,
-            "d3m": 90,
-            "d6m": 180,
-            "d12m": 365
+            "d1m": DateOffset(months=1),
+            "d3m": DateOffset(months=3),
+            "d6m": DateOffset(months=6),
+            "d12m": DateOffset(months=12)
         }
 
-        for period_name, days_back in periods.items():
-            # Calculate start date
-            start_date = actual_end_date - timedelta(days=days_back)
+        for period_name, offset in periods.items():
+            # Calculate start date using the calendar offset
+            start_date = actual_end_date - offset
 
             # Find closest trading day to start date
             start_candidates = df[df['date'] >= start_date]

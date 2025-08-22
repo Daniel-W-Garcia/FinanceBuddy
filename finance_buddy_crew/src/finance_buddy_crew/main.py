@@ -19,7 +19,7 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field, ConfigDict, ValidationError, model_validator
 
 from .crew import FinanceBuddy
-from .tools.extraction_tools import calculate_stock_returns
+from .tools.extraction_tools import calculate_stock_returns, get_financial_statements
 
 warnings.filterwarnings("ignore", category=SyntaxWarning, module="pysbd")
 
@@ -126,6 +126,11 @@ def run():
         crew_inputs['d12m_return'] = returns.get('d12m', 'N/A')
 
         print("✅ Price context values extracted.")
+
+        print("📊 Fetching and processing financial statements...")
+        company_facts_data = get_financial_statements(ticker=validated.ticker)
+        crew_inputs['company_facts_data'] = json.dumps(company_facts_data)
+        print("✅ Financial statements processed.")
 
         # DEBUG: inspect CrewAI's registered output-pydantic mapping keys so we can align tasks.yaml
         try:

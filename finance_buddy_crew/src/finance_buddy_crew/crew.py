@@ -191,7 +191,7 @@ def _llm_high() -> LLM:
 
 def _llm_med() -> LLM:
     return LLM(
-        model="gemini-2.5-flash",
+        model="gpt-5-mini-2025-08-07",
     )
 
 
@@ -238,7 +238,6 @@ class FinanceBuddy:
             verbose=True,
             llm=_llm_low(),
             max_iter=5,
-            tools=[get_company_facts]
         )
 
     @agent

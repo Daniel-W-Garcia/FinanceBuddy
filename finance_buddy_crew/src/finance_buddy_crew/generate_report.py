@@ -3,7 +3,6 @@
 generate_report.py
 
 Clean, self-contained report generator using jinja2.
-Place under: finance_buddy_crew/src/finance_buddy_crew/generate_report.py
 
 Outputs:
  - output/report_preview.html
@@ -24,13 +23,24 @@ import json
 import base64
 import math
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
+
 
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 from jinja2 import Template
+
+
+def find_project_root(marker="pyproject.toml") -> Path:
+
+    """Finds the project root by searching upwards for a marker file."""
+    current_path = Path(__file__).resolve()
+    for parent in [current_path] + list(current_path.parents):
+        if (parent / marker).exists():
+            return parent
+    raise FileNotFoundError(f"Project root marker '{marker}' not found from {current_path}.")
 
 sns.set_style("whitegrid")
 
@@ -50,26 +60,24 @@ def render_pdf(html: str, out_pdf: Path) -> bool:
         except Exception:
             return False
 
+try:
+    ROOT = find_project_root()
+    OUT_DIR = ROOT / "output"
+    FIG_DIR = OUT_DIR / "figs"
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    FIG_DIR.mkdir(parents=True, exist_ok=True)
+except FileNotFoundError as e:
+    print(f"Error: Could not find project root. {e}")
+    exit(1)
 
-# Path Configuration
-THIS = Path(__file__).resolve()
-ROOT = THIS.parents[2]  # Two parents above this file to match crew layout
-OUT_DIR = ROOT / "output"
-FIG_DIR = OUT_DIR / "figs"
-OUT_DIR.mkdir(parents=True, exist_ok=True)
-FIG_DIR.mkdir(parents=True, exist_ok=True)
 
-
-# File Discovery
 def find_json(name_tokens: List[str]) -> Optional[Path]:
-    """Find JSON files by searching for name patterns."""
-    # Direct name match first
+    """Finds the first existing JSON file by searching for name patterns in the output directory."""
     for name in name_tokens:
         p = OUT_DIR / name
         if p.exists():
             return p
-
-    # Pattern matching in filename
+    # Fallback to pattern matching
     for p in OUT_DIR.glob("*.json"):
         nm = p.name.lower()
         for tok in name_tokens:
@@ -77,32 +85,43 @@ def find_json(name_tokens: List[str]) -> Optional[Path]:
                 return p
     return None
 
-
-FILES = {
-    "facts": find_json(["company_facts_snapshot.json", "company_facts.json"]),
-    "edgar": find_json(["edgar_basics.json"]),
-    "price": find_json(["price_context.json"]),
-    "news": find_json(["news_and_catalysts.json"]),
-    "synth": find_json(["synthesis_brief.json", "synthesis.json"]),
-}
-
-
 def load_json(p: Optional[Path]) -> Dict[str, Any]:
-    """Safely load JSON file with error handling."""
+    """Safely loads a JSON file, returning an empty dict if it fails."""
     if not p or not p.exists():
         return {}
     try:
         return json.loads(p.read_text(encoding="utf-8"))
-    except Exception:
+    except Exception as e:
+        print(f"Warning: Failed to load or parse JSON file {p.name}. Error: {e}")
         return {}
 
+FILE_PATTERNS = {
+    "financial_facts": ["company_facts_snapshot.json"],
+    "edgar_basics": ["edgar_basics.json"],
+    "price_context": ["price_context.json"],
+    "news_and_catalysts": ["news_and_catalysts.json"],
+    "synthesis_brief": ["synthesis_brief.json"],
+    "fundamental_analysis": ["fundamental_analysis.json"],
+    "qualitative_analysis": ["qualitative_analysis.json"],
+}
 
-# Load all data files
-facts = load_json(FILES["facts"])
-edgar = load_json(FILES["edgar"])
-price_ctx = load_json(FILES["price"])
-news = load_json(FILES["news"])
-synth = load_json(FILES["synth"])
+def load_all_data(patterns: Dict[str, List[str]]) -> Dict[str, Dict[str, Any]]:
+    """Finds and loads all necessary JSON files based on patterns into a single dictionary."""
+    print("--- Loading Report Data ---")
+    loaded_data = {}
+    for key, file_patterns in patterns.items():
+        found_path = find_json(file_patterns)
+        if found_path:
+            print(f"  - Found '{key}' data at: {found_path.name}")
+            loaded_data[key] = load_json(found_path)
+        else:
+            print(f"  - WARNING: Could not find data file for '{key}'. Using empty data.")
+            loaded_data[key] = {}
+    print("---------------------------")
+    return loaded_data
+
+DATA = load_all_data(FILE_PATTERNS)
+
 
 
 # Data Processing Helpers
@@ -140,7 +159,7 @@ def first_val(arr: Optional[List[Dict[str, Any]]]) -> Optional[Any]:
 # Metadata Extraction
 def extract_ticker() -> str:
     """Extract ticker symbol from multiple possible sources."""
-    for src in (synth, facts, edgar, price_ctx, news):
+    for src in (DATA["synthesis_brief"], DATA["financial_facts"], DATA["edgar_basics"], DATA["price_context"], DATA["news_and_catalysts"]):
         if not isinstance(src, dict):
             continue
 
@@ -164,7 +183,7 @@ def extract_ticker() -> str:
 
 def extract_company() -> str:
     """Extract company name from multiple possible sources."""
-    for src in (edgar, facts, synth):
+    for src in (DATA["edgar_basics"], DATA["financial_facts"], DATA["synthesis_brief"]):
         if not isinstance(src, dict):
             continue
 
@@ -187,7 +206,7 @@ def extract_company() -> str:
 
 def extract_as_of() -> str:
     """Extract as_of date from multiple possible sources."""
-    for src in (synth, facts, price_ctx, edgar):
+    for src in (DATA["synthesis_brief"], DATA["financial_facts"], DATA["price_context"], DATA["edgar_basics"]):
         if not isinstance(src, dict):
             continue
 
@@ -202,7 +221,7 @@ def extract_as_of() -> str:
         if src.get("as_of"):
             return src.get("as_of")
 
-    return datetime.utcnow().strftime("%Y-%m-%d")
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
 
 # Extract primary metadata
@@ -210,24 +229,30 @@ TICKER = extract_ticker()
 COMPANY = extract_company()
 AS_OF = extract_as_of()
 
-# Prepare content
-tldr = sanitize_list(synth.get("tldr") or [])
-positives = sanitize_list(synth.get("positives") or [])
-risks = sanitize_list(synth.get("risks") or [])
-notable_filings = sanitize_list(synth.get("notable_filings") or [])
-recent_catalysts = sanitize_list(synth.get("recent_catalysts") or [])
-next_steps = sanitize_list(synth.get("next_steps") or [])
-disclaimer = synth.get("disclaimer") or ""
+print("Processing synthesis brief...")
+tldr = sanitize_list(DATA["synthesis_brief"].get("tldr") or [])
+positives = sanitize_list(DATA["synthesis_brief"].get("positives") or [])
+risks = sanitize_list(DATA["synthesis_brief"].get("risks") or [])
+next_steps = sanitize_list(DATA["synthesis_brief"].get("next_steps") or [])
+disclaimer = DATA["synthesis_brief"].get("disclaimer") or ""
+
+print("Processing specialist analysis...")
+fundamental_takeaways = sanitize_list(DATA["fundamental_analysis"].get("fundamental_takeaways") or [])
+qualitative_takeaways = sanitize_list(DATA["qualitative_analysis"].get("qualitative_takeaways") or [])
+
+print("Processing data points...")
+notable_filings = sanitize_list(DATA["synthesis_brief"].get("notable_filings") or [])
+recent_catalysts = sanitize_list(DATA["synthesis_brief"].get("recent_catalysts") or [])
 
 # Financial metrics
-revenue = first_val(facts.get("revenue"))
-cash = first_val(facts.get("cash_or_fcf_proxy"))
-debt = first_val(facts.get("debt"))
-eps = first_val(facts.get("diluted_eps"))
-shares = first_val(facts.get("shares_diluted"))
+revenue = first_val(DATA["financial_facts"].get("revenue"))
+cash = first_val(DATA["financial_facts"].get("cash_or_fcf_proxy"))
+debt = first_val(DATA["financial_facts"].get("debt"))
+eps = first_val(DATA["financial_facts"].get("diluted_eps"))
+shares = first_val(DATA["financial_facts"].get("shares_diluted"))
 
 # Returns processing
-provided_returns = price_ctx.get("returns", {}) if isinstance(price_ctx, dict) else {}
+provided_returns = DATA["price_context"].get("returns", {}) if isinstance(DATA["price_context"], dict) else {}
 final_returns: Dict[str, Optional[float]] = {}
 for k in ("d1m", "d3m", "d6m", "d12m"):
     raw = provided_returns.get(k)
@@ -361,7 +386,7 @@ def make_returns_chart(returns_obj: Dict[str, Optional[float]], outpath: Path) -
 # Generate charts
 FIG_REV = FIG_DIR / "revenue_net_income.png"
 FIG_RET = FIG_DIR / "returns.png"
-make_financial_trend_chart(facts, FIG_REV)
+make_financial_trend_chart(DATA["financial_facts"], FIG_REV)
 make_returns_chart(final_returns, FIG_RET)
 
 
@@ -413,7 +438,8 @@ TEMPLATE = """
             padding: 6px; 
             background: #fff; 
         }
-        ul { margin: 6px 0 6px 18px; padding-left: 0; }
+        ul { margin: 6px 0 12px 18px; padding: 0; }
+        p.muted { margin-top: 6px; font-style: italic; }
         footer { 
             border-top: 1px solid #f0f0f0; 
             color: #888; 
@@ -448,9 +474,13 @@ TEMPLATE = """
     <div class="two-col" style="margin-top:12px">
         <div class="left">
             <h2>TL;DR</h2>
-            <ul>
-                {% for b in tldr %}<li>{{ b }}</li>{% endfor %}
-            </ul>
+            {% if tldr %}
+                <ul>
+                    {% for b in tldr %}<li>{{ b }}</li>{% endfor %}
+                </ul>
+            {% else %}
+                <p class="muted">No TL;DR summary was generated.</p>
+            {% endif %}
 
             <h2>Key Financials</h2>
             <table class="metrics">
@@ -473,32 +503,72 @@ TEMPLATE = """
                 <img src="{{ ret_uri }}" style="width:60%">
             </div>
 
+            <!-- ADDED: Direct output from the Fundamental Analyst -->
+            <h2>Fundamental Analysis</h2>
+            {% if fundamental_takeaways %}
+                <ul>
+                    {% for b in fundamental_takeaways %}<li>{{ b }}</li>{% endfor %}
+                </ul>
+            {% else %}
+                <p class="muted">No fundamental analysis takeaways were generated.</p>
+            {% endif %}
+
             <h2>Notable Filings</h2>
-            <ul>
-                {% for f in notable_filings %}<li>{{ f }}</li>{% endfor %}
-            </ul>
+            {% if notable_filings %}
+                <ul>
+                    {% for f in notable_filings %}<li>{{ f }}</li>{% endfor %}
+                </ul>
+            {% else %}
+                <p class="muted">No notable filings were identified.</p>
+            {% endif %}
         </div>
 
         <div class="right">
             <h2>Positives</h2>
-            <ul>
-                {% for p in positives %}<li>{{ p }}</li>{% endfor %}
-            </ul>
+            {% if positives %}
+                <ul>
+                    {% for p in positives %}<li>{{ p }}</li>{% endfor %}
+                </ul>
+            {% else %}
+                <p class="muted">No positives were identified.</p>
+            {% endif %}
 
             <h2>Risks</h2>
-            <ul>
-                {% for r in risks %}<li>{{ r }}</li>{% endfor %}
-            </ul>
+            {% if risks %}
+                <ul>
+                    {% for r in risks %}<li>{{ r }}</li>{% endfor %}
+                </ul>
+            {% else %}
+                <p class="muted">No risks were identified.</p>
+            {% endif %}
+
+            <!-- ADDED: Direct output from the Qualitative Analyst -->
+            <h2>Qualitative Analysis</h2>
+            {% if qualitative_takeaways %}
+                <ul>
+                    {% for b in qualitative_takeaways %}<li>{{ b }}</li>{% endfor %}
+                </ul>
+            {% else %}
+                <p class="muted">No qualitative analysis takeaways were generated.</p>
+            {% endif %}
 
             <h2>Recent Catalysts</h2>
-            <ul>
-                {% for c in recent_catalysts %}<li>{{ c }}</li>{% endfor %}
-            </ul>
+            {% if recent_catalysts %}
+                <ul>
+                    {% for c in recent_catalysts %}<li>{{ c }}</li>{% endfor %}
+                </ul>
+            {% else %}
+                <p class="muted">No recent catalysts were identified.</p>
+            {% endif %}
 
             <h2>Next Steps</h2>
-            <ul>
-                {% for n in next_steps %}<li>{{ n }}</li>{% endfor %}
-            </ul>
+            {% if next_steps %}
+                <ul>
+                    {% for n in next_steps %}<li>{{ n }}</li>{% endfor %}
+                </ul>
+            {% else %}
+                <p class="muted">No next steps were identified.</p>
+            {% endif %}
 
             <div style="margin-top:12px;color:#666">
                 <strong>Disclaimer</strong>
@@ -517,13 +587,25 @@ TEMPLATE = """
 </html>
 """
 
-# Render Report
-# Render Report
+# --- FINAL: RENDER REPORT ---
+
+# Create a safe, default raw_audit dictionary to prevent errors
+raw_audit_data = {
+    "provided_returns": provided_returns or {},
+    "normalized_returns_percent": final_returns or {},
+    "vol_percent": vol_percent if vol_percent is not None else "N/A"
+}
+
+# Build the complete context dictionary with all keys the template needs
 context = {
+    # Metadata
     "company": COMPANY,
     "ticker": TICKER,
     "as_of": AS_OF,
-    "generated_at": datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC"),
+    # Best practice: use timezone.utc for timezone-aware datetimes
+    "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
+
+    # Synthesis Brief Content
     "tldr": tldr,
     "positives": positives,
     "risks": risks,
@@ -531,21 +613,28 @@ context = {
     "recent_catalysts": recent_catalysts,
     "next_steps": next_steps,
     "disclaimer": disclaimer,
-    "revenue": f"${revenue:,.0f}" if revenue else "N/A",
-    "cash": f"${cash:,.0f}" if cash else "N/A",
-    "debt": f"${debt:,.0f}" if debt else "N/A",
-    "eps": f"{eps:.2f}" if eps else "N/A",
-    "shares": f"{int(shares):,}" if shares else "N/A",
+
+    # Specialist Analysis Content
+    "fundamental_takeaways": fundamental_takeaways,
+    "qualitative_takeaways": qualitative_takeaways,
+
+    # Key Financial Metrics (formatted for display with safe defaults)
+    "revenue": f"${int(revenue):,}" if revenue is not None else "N/A",
+    "cash": f"${int(cash):,}" if cash is not None else "N/A",
+    "debt": f"${int(debt):,}" if debt is not None else "N/A",
+    "eps": f"{eps:.2f}" if eps is not None else "N/A",
+    "shares": f"{int(shares):,}" if shares is not None else "N/A",
+
+    # Image Data URIs for embedding charts
     "rev_uri": rev_uri,
     "ret_uri": ret_uri,
-    "raw_audit": {
-        "provided_returns": provided_returns,
-        "normalized_returns_percent": {k: final_returns.get(k) for k in ("d1m", "d3m", "d6m", "d12m")},
-        "vol_percent": vol_percent,
-    }
+
+    # Raw data for the audit section
+    "raw_audit": raw_audit_data,
 }
 
 # Render the HTML using the Jinja2 template
+print("Rendering final HTML report...")
 template = Template(TEMPLATE)
 html = template.render(context)
 
@@ -558,8 +647,9 @@ pdf_out = OUT_DIR / "report.pdf"
 ok = render_pdf(html, pdf_out)
 
 # Print final status messages
-print("Preview written to:", preview)
+print("\n--- Report Generation Complete ---")
+print(f"✅ HTML preview written to: {preview}")
 if ok:
-    print("PDF written to:", pdf_out)
+    print(f"✅ PDF written to: {pdf_out}")
 else:
-    print("PDF renderer not available or failed; open preview HTML and print to PDF manually.")
+    print("⚠️ PDF renderer not available or failed; open the HTML preview and print to PDF manually.")
